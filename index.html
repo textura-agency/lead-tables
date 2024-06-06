@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Tables</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            width: 90%;
+            background: #fff;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            margin: 20px auto;
+            overflow: auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            background: #f9f9f9;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+            font-size: 12px;
+        }
+
+        th,
+        td {
+            padding: 5px;
+            border: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .data-container {
+            overflow-y: auto;
+            max-height: 200px;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .settings-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .settings-container label {
+            margin-right: 10px;
+        }
+
+        .export-checkbox {
+            margin-right: 5px;
+        }
+
+        .stats {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .select-wrapper {
+            margin-top: 10px;
+        }
+
+        .filters-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filters-container > * {
+            flex: 1 1 auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Data Tables</h1>
+        <button class="load-button">Create New Table</button>
+        <div id="tables-container"></div>
+        <div class="export-container">
+            <label for="export-table-select">Select Table to Export:</label>
+            <select id="export-table-select"></select>
+            <button id="export-button">Export Selected Table to CSV</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelector('.load-button').addEventListener('click', addLoadButton, false);
+            document.getElementById('export-button').addEventListener('click', exportSelectedTableToCSV, false);
+        });
+
+        let tablesData = [];
+        let tableCount = 0;
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            const tableIndex = parseInt(event.target.dataset.tableIndex);
+            for (let file of files) {
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+                if (fileExtension === 'csv') {
+                    Papa.parse(file, {
+                        header: true,
+                        complete: function (results) {
+                            const data = results.data;
+                            const columns = Object.keys(data[0]);
+                            const tableData = { columns, data };
+                            tablesData[tableIndex - 1] = tableData;
+                            createTable(tableData, tableIndex);
+                            populateFilterOptions();
+                            updateRowCount(tableIndex);
+                            populateExportTableSelect();
+                        }
+                    });
+                } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                        const columns = Object.keys(jsonData[0]);
+                        const tableData = { columns, data: jsonData };
+                        tablesData[tableIndex - 1] = tableData;
+                        createTable(tableData, tableIndex);
+                        populateFilterOptions();
+                        updateRowCount(tableIndex);
+                        populateExportTableSelect();
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            }
+        }
+
+        function createTable(tableData, index) {
+            tableCount++;
+            const tableContainer = document.createElement('div');
+            tableContainer.classList.add('table-wrapper');
+            tableContainer.innerHTML = `
+                <h2>Table ${index}</h2>
+                <div class="settings-container">
+                    <label for="scroll-height-${index}">Scrollable Height:</label>
+                    <input type="number" id="scroll-height-${index}" min="0">
+                </div>
+                <div class="filters-container">
+                    <div class="filters">
+                        <label for="filter-column-${index}">Filter Column:</label>
+                        <select id="filter-column-${index}">
+                            <option value="all">All</option>
+                        </select>
+                        <input type="text" id="filter-value-${index}" placeholder="Filter value">
+                        <button id="filter-button-${index}">Show Founded</button>
+                    </div>
+                    <div class="duplicates">
+                        <label for="duplicate-column-${index}">Check Duplicates by:</label>
+                        <select id="duplicate-column-${index}"></select>
+                        <button id="show-duplicates-button-${index}">Show Duplicates</button>
+                        <button id="show-without-duplicates-button-${index}">Show Without Duplicates</button>
+                    </div>
+                    <div class="compare-duplicates">
+                        <label for="compare-table-${index}">Compare with Table:</label>
+                        <select id="compare-table-${index}"></select>
+                        <label for="compare-duplicate-column-${index}">Column:</label>
+                        <select id="compare-duplicate-column-${index}"></select>
+                        <button id="show-compare-duplicates-button-${index}">Show Duplicates in Compare Table</button>
+                        <button id="show-without-compare-duplicates-button-${index}">Show Without Duplicates in Compare Table</button>
+                    </div>
+                </div>
+                <button id="clear-filters-button-${index}">Clear Filters</button>
+                <div class="stats">
+                    <span id="row-count-${index}">Total Rows: ${tableData.data.length}</span>
+                    <span id="displayed-row-count-${index}">Displayed Rows: ${tableData.data.length}</span>
+                </div>
+                <div class="data-container" style="max-height: 200px;">
+                    <table>
+                        <thead>
+                            <tr id="table-header-${index}"></tr>
+                        </thead>
+                        <tbody id="table-body-${index}"></tbody>
+                    </table>
+                </div>
+            `;
+            document.getElementById('tables-container').appendChild(tableContainer);
+            populateTable(tableData, index);
+            populateFilterOptions();
+            addTableEventListeners(index);
+            updateScrollableHeight(index);
+            for (let i = 1; i <= tableCount; i++) {
+                populateComparisonTableOptions(i);
+            }
+        }
+
+        function populateComparisonTableOptions(index) {
+            const compareSelect = document.getElementById(`compare-table-${index}`);
+            if (!compareSelect) { return }
+            compareSelect.innerHTML = '';
+
+            tablesData.forEach((_, i) => {
+                if (i !== index - 1) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = `Table ${i + 1}`;
+                    compareSelect.appendChild(option);
+                }
+            });
+        }
+
+        function checkDuplicatesCompare(index) {
+            const tableIndex = index - 1;
+            const duplicateColumn = document.getElementById(`compare-duplicate-column-${index}`).value;
+            const compareTableIndex = document.getElementById(`compare-table-${index}`).value;
+            if (!tablesData?.[compareTableIndex] || !tablesData?.[tableIndex]) { return }
+            const compareTableData = tablesData[compareTableIndex].data;
+            let currentTableData = tablesData[tableIndex].data;
+
+            if (!compareTableData || !currentTableData) { return }
+
+            const seenValues = new Set(compareTableData.map(row => row[duplicateColumn]));
+            const duplicates = currentTableData.filter(row => seenValues.has(row[duplicateColumn]));
+
+            populateTable({ columns: tablesData[tableIndex].columns, data: duplicates }, index);
+        }
+
+        function showWithoutDuplicatesCompare(index) {
+            const tableIndex = index - 1;
+            const duplicateColumn = document.getElementById(`compare-duplicate-column-${index}`).value;
+            const compareTableIndex = document.getElementById(`compare-table-${index}`).value;
+            if (!tablesData?.[compareTableIndex] || !tablesData?.[tableIndex]) { return }
+            const compareTableData = tablesData[compareTableIndex].data;
+            let currentTableData = tablesData[tableIndex].data;
+
+            if (!compareTableData || !currentTableData) { return }
+
+            const seenValues = new Set(compareTableData.map(row => row[duplicateColumn]));
+            const nonDuplicates = currentTableData.filter(row => !seenValues.has(row[duplicateColumn]));
+
+            populateTable({ columns: tablesData[tableIndex].columns, data: nonDuplicates }, index);
+        }
+
+        function populateTable(tableData, index) {
+            const thead = document.getElementById(`table-header-${index}`);
+            thead.innerHTML = '';
+            tableData.columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                thead.appendChild(th);
+            });
+
+            const tbody = document.getElementById(`table-body-${index}`);
+            tbody.innerHTML = '';
+            tableData.data.forEach(row => {
+                const tr = document.createElement('tr');
+                tableData.columns.forEach(key => {
+                    const td = document.createElement('td');
+                    td.textContent = row[key] || '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            updateDisplayedRowCount(tableData.data.length, index);
+        }
+
+        function populateFilterOptions() {
+            for (let index = 1; index <= tablesData.length; index++) {
+                const filterSelect = document.getElementById(`filter-column-${index}`);
+                filterSelect.innerHTML = '<option value="all">All</option>';
+                const duplicateSelect = document.getElementById(`duplicate-column-${index}`);
+                duplicateSelect.innerHTML = '';
+                const compareDuplicateSelect = document.getElementById(`compare-duplicate-column-${index}`);
+                compareDuplicateSelect.innerHTML = '';
+
+                tablesData[index - 1].columns.forEach(col => {
+                    const filterOption = document.createElement('option');
+                    filterOption.value = col;
+                    filterOption.textContent = col;
+                    filterSelect.appendChild(filterOption);
+
+                    const duplicateOption = document.createElement('option');
+                    duplicateOption.value = col;
+                    duplicateOption.textContent = col;
+                    duplicateSelect.appendChild(duplicateOption);
+
+                    const compareDuplicateOption = document.createElement('option');
+                    compareDuplicateOption.value = col;
+                    compareDuplicateOption.textContent = col;
+                    compareDuplicateSelect.appendChild(compareDuplicateOption);
+                });
+            }
+        }
+
+        function addTableEventListeners(index) {
+            document.getElementById(`filter-button-${index}`).addEventListener('click', () => filterTable(index), false);
+            document.getElementById(`clear-filters-button-${index}`).addEventListener('click', () => clearFilters(index), false);
+            document.getElementById(`show-duplicates-button-${index}`).addEventListener('click', () => showDuplicates(index), false);
+            document.getElementById(`show-without-duplicates-button-${index}`).addEventListener('click', () => showWithoutDuplicates(index), false);
+            document.getElementById(`show-compare-duplicates-button-${index}`).addEventListener('click', () => checkDuplicatesCompare(index), false);
+            document.getElementById(`show-without-compare-duplicates-button-${index}`).addEventListener('click', () => showWithoutDuplicatesCompare(index), false);
+            document.getElementById(`scroll-height-${index}`).addEventListener('change', () => updateScrollableHeight(index), false);
+            document.getElementById(`scroll-height-${index}`).addEventListener('input', () => updateScrollableHeight(index), false);
+        }
+
+        function filterTable(index) {
+            const filterColumn = document.getElementById(`filter-column-${index}`).value;
+            const filterValue = document.getElementById(`filter-value-${index}`).value.toLowerCase();
+
+            let filteredData;
+            if (filterColumn === 'all') {
+                filteredData = tablesData[index - 1].data;
+            } else {
+                filteredData = tablesData[index - 1].data.filter(row => row[filterColumn]?.toLowerCase().includes(filterValue));
+            }
+            populateTable({ columns: tablesData[index - 1].columns, data: filteredData }, index);
+        }
+
+        function clearFilters(index) {
+            document.getElementById(`filter-column-${index}`).value = 'all';
+            document.getElementById(`filter-value-${index}`).value = '';
+            document.getElementById(`duplicate-column-${index}`).value = '';
+            document.getElementById(`compare-duplicate-column-${index}`).value = '';
+            document.getElementById(`compare-table-${index}`).value = '';
+            populateTable(tablesData[index - 1], index);
+        }
+
+        function showDuplicates(index) {
+            const duplicateColumn = document.getElementById(`duplicate-column-${index}`).value;
+            const seenValues = new Set();
+            const duplicates = tablesData[index - 1].data.filter(row => {
+                if (seenValues.has(row[duplicateColumn])) {
+                    return true;
+                } else {
+                    seenValues.add(row[duplicateColumn]);
+                    return false;
+                }
+            });
+            populateTable({ columns: tablesData[index - 1].columns, data: duplicates }, index);
+        }
+
+        function showWithoutDuplicates(index) {
+            const duplicateColumn = document.getElementById(`duplicate-column-${index}`).value;
+            const uniqueData = [];
+            const seenValues = new Set();
+            tablesData[index - 1].data.forEach(row => {
+                if (!seenValues.has(row[duplicateColumn])) {
+                    seenValues.add(row[duplicateColumn]);
+                    uniqueData.push(row);
+                }
+            });
+            populateTable({ columns: tablesData[index - 1].columns, data: uniqueData }, index);
+        }
+
+        function updateRowCount(index) {
+            document.getElementById(`row-count-${index}`).textContent = `Total Rows: ${tablesData[index - 1].data.length}`;
+        }
+
+        function updateDisplayedRowCount(count, index) {
+            document.getElementById(`displayed-row-count-${index}`).textContent = `Displayed Rows: ${count}`;
+        }
+
+        function populateExportTableSelect() {
+            const exportSelect = document.getElementById('export-table-select');
+            exportSelect.innerHTML = '';
+            tablesData.forEach((table, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `Table ${index + 1}`;
+                exportSelect.appendChild(option);
+            });
+        }
+
+        function exportSelectedTableToCSV() {
+            const selectedTableIndex = document.getElementById('export-table-select').value;
+            if (selectedTableIndex === '') {
+                alert('Please select a table to export.');
+                return;
+            }
+
+            const displayedRows = Array.from(document.querySelectorAll(`#table-body-${+selectedTableIndex + 1} tr`)).map(row => {
+                return Array.from(row.querySelectorAll('td')).map(cell => {
+                    if (cell.textContent.includes(',')) {
+                        return `"${cell.textContent}"`;
+                    } else {
+                        return cell.textContent;
+                    }
+                });
+            });
+
+            const csvRows = [tablesData[selectedTableIndex].columns].concat(displayedRows);
+            const csv = csvRows.map(row => row.join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `exported_table_${selectedTableIndex + 1}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function updateScrollableHeight(index) {
+            const heightInput = document.getElementById(`scroll-height-${index}`);
+            const height = parseInt(heightInput.value);
+            const dataContainer = document.querySelector(`#table-body-${index}`).parentElement.parentElement;
+            dataContainer.style.maxHeight = `${height}px`;
+        }
+
+        function addLoadButton() {
+            const tableIndex = tablesData.length + 1;
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.classList.add('file-input');
+            fileInput.dataset.tableIndex = tableIndex;
+            fileInput.addEventListener('change', handleFileSelect, false);
+            const loadButton = document.querySelector('.load-button');
+            loadButton.parentNode.insertBefore(fileInput, loadButton);
+        }
+
+        function removeTable(index) {
+            const tableContainer = document.querySelector(`.table-wrapper:nth-child(${index + 1})`);
+            tableContainer.parentNode.removeChild(tableContainer);
+            tablesData.splice(index - 1, 1);
+            tableCount--;
+        }
+    </script>
+</body>
+
+</html>
